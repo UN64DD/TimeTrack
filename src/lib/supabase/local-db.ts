@@ -1,3 +1,5 @@
+import { matchesParticipantSearch, normalizeSearchTerm } from '../participant-search';
+
 // Dynamic server-only imports
 const getFs = () => (typeof window === 'undefined' ? require('fs') : null);
 const getPath = () => (typeof window === 'undefined' ? require('path') : null);
@@ -762,6 +764,50 @@ export function createLocalSupabaseClient() {
             data: { registration_id: regId, net_amount: net, total_amount: total, discount_amount: discount },
             error: null,
           };
+        }
+
+        if (fnName === 'search_event_participants') {
+          const term = normalizeSearchTerm(args.p_query);
+          const limit = Math.min(Math.max(Number(args.p_limit) || 25, 1), 100);
+          const rows: Array<{
+            participant_id: string;
+            full_name: string;
+            ic_passport: string | null;
+            bib_name: string | null;
+            bib_number: string | null;
+            category_id: string | null;
+            category_name: string | null;
+            registration_id: string;
+            order_number: string;
+            registration_status: string;
+          }> = [];
+
+          for (const reg of db.registrations || []) {
+            if (reg.event_id !== args.p_event_id || reg.deleted_at) continue;
+            for (const participant of db.participants || []) {
+              if (participant.registration_id !== reg.id || participant.deleted_at) continue;
+
+              const categories = (db.event_categories || []) as Array<{ id: string; name: string }>;
+              const category = categories.find((c) => c.id === participant.category_id);
+              const row = {
+                participant_id: participant.id,
+                full_name: participant.full_name,
+                ic_passport: participant.ic_passport ?? null,
+                bib_name: participant.bib_name ?? null,
+                bib_number: participant.bib_number ?? null,
+                category_id: participant.category_id ?? null,
+                category_name: category?.name ?? null,
+                registration_id: reg.id,
+                order_number: reg.registration_number,
+                registration_status: reg.status,
+              };
+
+              if (matchesParticipantSearch(row, term)) rows.push(row);
+            }
+          }
+
+          rows.sort((a, b) => String(a.full_name).localeCompare(String(b.full_name)));
+          return { data: rows.slice(0, limit), error: null };
         }
 
         return { data: null, error: { message: `Unknown RPC: ${fnName}` } };

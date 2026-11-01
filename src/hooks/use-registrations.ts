@@ -2,6 +2,8 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { searchEventParticipantsAction } from '@/lib/server/actions/participant.actions';
+import { isSearchableTerm } from '@/lib/participant-search';
 import type { Registration } from '@/lib/types';
 
 export function useRegistrations(eventId?: string) {
@@ -45,6 +47,17 @@ export function useRegistration(registrationId: string) {
       return data as unknown as Registration;
     },
     enabled: !!registrationId,
+  });
+}
+
+export function useParticipantSearch(eventId: string | undefined, query: string) {
+  const term = query.trim();
+  return useQuery({
+    queryKey: ['participant-search', eventId, term],
+    queryFn: () => searchEventParticipantsAction(eventId!, term),
+    enabled: !!eventId && isSearchableTerm(term),
+    staleTime: 10_000,
+    retry: false,
   });
 }
 

@@ -1,15 +1,16 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
-import { Calendar, MapPin, Users, DollarSign, Plus, Trash2, Edit2, Loader2, ArrowLeft, Check, X, ShieldAlert, Layers } from 'lucide-react';
+import { Calendar, MapPin, Users, DollarSign, Plus, Trash2, Edit2, Loader2, ArrowLeft, Check, X, ShieldAlert, Layers, Search, RefreshCw, AlertCircle } from 'lucide-react';
 import { EventCoverUpload } from '@/components/events/event-cover-upload';
 import { DashboardFrame } from '@/components/layout/dashboard-frame';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useEvent } from '@/hooks/use-events';
-import { useOrganizerRegistrations } from '@/hooks/use-registrations';
+import { useOrganizerRegistrations, useParticipantSearch } from '@/hooks/use-registrations';
+import { MIN_SEARCH_LENGTH } from '@/lib/participant-search';
 import { updateEventStatusAction, deleteEventAction } from '@/lib/server/actions/event.actions';
 import { toast } from 'sonner';
 import { Award } from 'lucide-react';
@@ -271,7 +272,7 @@ function EventDetailContent() {
               />
             )}
             {tab === 'registrations' && (
-              <RegistrationsSection regs={regs} loading={regsLoading} />
+              <RegistrationsSection regs={regs} loading={regsLoading} eventId={id} />
             )}
           </div>
         </div>
@@ -460,9 +461,12 @@ function CategoriesSection({
   );
 }
 
-function RegistrationsSection({ regs, loading }: { regs: any[] | undefined; loading: boolean }) {
+function RegistrationsSection({ regs, loading, eventId }: { regs: any[] | undefined; loading: boolean; eventId: string }) {
   return (
-    <div className="glass rounded-2xl overflow-hidden overflow-x-auto w-full">
+    <div className="space-y-6">
+      <ParticipantSearchPanel eventId={eventId} />
+
+      <div className="glass rounded-2xl overflow-hidden overflow-x-auto w-full">
       <table className="w-full min-w-[700px]">
         <thead>
           <tr className="border-b border-slate-300">
@@ -510,6 +514,130 @@ function RegistrationsSection({ regs, loading }: { regs: any[] | undefined; load
           )}
         </tbody>
       </table>
+      </div>
+    </div>
+  );
+}
+
+function ParticipantSearchPanel({ eventId }: { eventId: string }) {
+  const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const trimmed = debouncedQuery.trim();
+  const isActive = trimmed.length >= MIN_SEARCH_LENGTH;
+  const isTooShort = query.trim().length > 0 && query.trim().length < MIN_SEARCH_LENGTH;
+
+  const { data: results, isFetching, isError, error, refetch } = useParticipantSearch(eventId, debouncedQuery);
+
+  return (
+    <div className="glass rounded-2xl p-4 space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold normal-case tracking-normal text-slate-600">Find a participant</h3>
+        <p className="text-[11px] text-slate-600 font-medium normal-case tracking-normal">
+          Search by name, IC number or order number. Partial matches are supported and IC numbers can be entered with or without dashes.
+        </p>
+      </div>
+
+      <div className="relative">
+        <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name, IC number or order number..."
+          aria-label="Search participants by name, IC number or order number"
+          className="input-field pl-10 pr-10"
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={() => setQuery('')}
+            aria-label="Clear participant search"
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+
+      {isTooShort && !isActive && (
+        <p className="text-[11px] font-semibold text-slate-600">Type at least {MIN_SEARCH_LENGTH} characters to search.</p>
+      )}
+
+      {isActive && (
+        <div className="overflow-hidden overflow-x-auto w-full border border-slate-300 rounded-xl">
+          <table className="w-full min-w-[700px]">
+            <thead>
+              <tr className="border-b border-slate-300 bg-slate-50">
+                <th className="text-left p-3 text-xs font-semibold normal-case tracking-normal text-slate-600">Participant</th>
+                <th className="text-left p-3 text-xs font-semibold normal-case tracking-normal text-slate-600">IC Number</th>
+                <th className="text-left p-3 text-xs font-semibold normal-case tracking-normal text-slate-600">Order Number</th>
+                <th className="text-left p-3 text-xs font-semibold normal-case tracking-normal text-slate-600">Category</th>
+                <th className="text-left p-3 text-xs font-semibold normal-case tracking-normal text-slate-600">BIB</th>
+                <th className="text-left p-3 text-xs font-semibold normal-case tracking-normal text-slate-600">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isFetching && !results ? (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center">
+                    <Loader2 size={20} className="animate-spin mx-auto text-blue-700" />
+                    <p className="mt-2 text-xs text-slate-600">Searching participants…</p>
+                  </td>
+                </tr>
+              ) : isError ? (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center">
+                    <AlertCircle size={20} className="mx-auto text-red-700 mb-2" />
+                    <p className="text-xs font-semibold text-red-700">
+                      {error instanceof Error ? error.message : 'Could not search participants.'}
+                    </p>
+                    <button type="button" onClick={() => refetch()} className="btn-secondary text-xs mt-3 inline-flex items-center gap-1.5">
+                      <RefreshCw size={12} /> Try again
+                    </button>
+                  </td>
+                </tr>
+              ) : !results?.length ? (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center">
+                    <p className="text-xs font-bold normal-case tracking-normal text-slate-600">
+                      No participants match “{trimmed}” in this event.
+                    </p>
+                    <p className="text-[11px] text-slate-600 mt-1">Try a different name, IC number or order number.</p>
+                  </td>
+                </tr>
+              ) : (
+                results.map((p) => (
+                  <tr key={p.participant_id} className="border-b border-slate-300 last:border-0 hover:bg-slate-100 transition-colors">
+                    <td className="p-3 text-xs font-bold">{p.full_name}</td>
+                    <td className="p-3 font-mono text-xs text-slate-600">{p.ic_passport || '—'}</td>
+                    <td className="p-3 font-mono text-xs font-bold text-blue-700">{p.order_number}</td>
+                    <td className="p-3 text-xs text-slate-600">{p.category_name || '—'}</td>
+                    <td className="p-3 font-mono text-xs text-slate-600">{p.bib_number || '—'}</td>
+                    <td className="p-3">
+                      <span className={`text-xs font-semibold normal-case tracking-normal px-2 py-0.5 rounded-full ${
+                        p.registration_status === 'PAID' || p.registration_status === 'CONFIRMED' ? 'bg-green-500/10 text-green-700' :
+                        p.registration_status === 'PENDING' ? 'bg-yellow-500/10 text-yellow-700' :
+                        'bg-red-500/10 text-red-700'
+                      }`}>{p.registration_status}</span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+          {results && results.length > 0 && (
+            <p className="p-3 text-[11px] text-slate-600 border-t border-slate-300">
+              Showing {results.length} participant{results.length === 1 ? '' : 's'} for this event. IC numbers are partially masked.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
